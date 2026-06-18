@@ -48,11 +48,19 @@ tokens.forEach((token, index) => {
   let currentFileIndex = 1;
   let isPlaying = false;
 
+  let audioTimeout = null;
+
   const playSequentialAudio = () => {
     if (currentFileIndex > 10) {
       console.log(`[Bot ${botNum}] ✅ Finished playing all 10 audio files!`);
       currentFileIndex = 1;
       isPlaying = false;
+      if (audioTimeout) clearTimeout(audioTimeout);
+      return;
+    }
+
+    if (!isPlaying) {
+      if (audioTimeout) clearTimeout(audioTimeout);
       return;
     }
 
@@ -62,35 +70,66 @@ tokens.forEach((token, index) => {
     if (!fs.existsSync(audioPath)) {
       console.error(`[Bot ${botNum}] ❌ File not found: ${audioPath}`);
       currentFileIndex++;
-      playSequentialAudio();
+      if (audioTimeout) clearTimeout(audioTimeout);
+      audioTimeout = setTimeout(playSequentialAudio, 100);
       return;
     }
 
-    const resource = createAudioResource(audioPath, {
-      inlineVolume: true
-    });
+    try {
+      const resource = createAudioResource(audioPath, {
+        inlineVolume: true,
+        inputType: 'arbitrary'
+      });
 
-    if (resource.volume) {
-      resource.volume.setVolume(5.0);
-    }
-
-    player = createAudioPlayer();
-    
-    player.on(AudioPlayerStatus.Idle, () => {
-      if (isPlaying) {
-        currentFileIndex++;
-        playSequentialAudio();
+      if (resource.volume) {
+        resource.volume.setVolume(5.0);
       }
-    });
 
-    player.on('error', error => {
-      console.error(`[Bot ${botNum}] ❌ Playback Error:`, error.message);
+      if (player) {
+        player.stop();
+      }
+
+      player = createAudioPlayer();
+      
+      let idleEventFired = false;
+
+      player.on(AudioPlayerStatus.Idle, () => {
+        if (!idleEventFired && isPlaying) {
+          idleEventFired = true;
+          console.log(`[Bot ${botNum}] ✅ File ${currentFileIndex} finished, moving to next`);
+          currentFileIndex++;
+          if (audioTimeout) clearTimeout(audioTimeout);
+          audioTimeout = setTimeout(playSequentialAudio, 50);
+        }
+      });
+
+      player.on('error', error => {
+        console.error(`[Bot ${botNum}] ❌ Playback Error:`, error.message);
+        currentFileIndex++;
+        if (audioTimeout) clearTimeout(audioTimeout);
+        audioTimeout = setTimeout(playSequentialAudio, 100);
+      });
+
+      // Reduced timeout to 30 seconds as fallback
+      if (audioTimeout) clearTimeout(audioTimeout);
+      audioTimeout = setTimeout(() => {
+        if (isPlaying && !idleEventFired) {
+          console.log(`[Bot ${botNum}] ⏱️ Timeout - forcing next file`);
+          idleEventFired = true;
+          currentFileIndex++;
+          player.stop();
+          audioTimeout = setTimeout(playSequentialAudio, 50);
+        }
+      }, 30000);
+
+      player.play(resource);
+      connection.subscribe(player);
+    } catch (err) {
+      console.error(`[Bot ${botNum}] ❌ Error playing audio:`, err.message);
       currentFileIndex++;
-      playSequentialAudio();
-    });
-
-    player.play(resource);
-    connection.subscribe(player);
+      if (audioTimeout) clearTimeout(audioTimeout);
+      audioTimeout = setTimeout(playSequentialAudio, 100);
+    }
   };
 
   client.on('ready', () => {
