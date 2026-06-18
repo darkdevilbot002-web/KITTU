@@ -148,6 +148,7 @@ tokens.forEach((token, index) => {
       currentFileIndex = 1;
       if (connection) {
         connection.destroy();
+        connection = null;
         console.log(`[Bot ${botNum}] 👋 LEFT voice channel`);
       }
     }
